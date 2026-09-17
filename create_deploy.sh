@@ -73,7 +73,7 @@ MASTER_KEY       = ${MASTER_KEY}
 JWT_SECRET       = ${JWT_SECRET}
 
 # Acesso à aplicação (após subir os containers):
-# URL: http://<ip-do-servidor>:8080
+# URL: http://<ip-do-servidor>:${APP_PORT}
 # Usuário: admin
 # Senha: verifique os logs com: docker compose -f deploy/compose.yaml logs signalhunter
 SECRETS_EOF
@@ -134,7 +134,7 @@ RUN chmod +x /usr/local/bin/signalhunter
 USER signalhunter
 WORKDIR /opt/signalhunter
 
-EXPOSE 8080
+EXPOSE ${APP_PORT}
 
 CMD ["/usr/local/bin/signalhunter"]
 DOCKERFILE_EOF
@@ -180,7 +180,7 @@ mode = "production"
 
 [server]
 host          = "0.0.0.0"
-port          = 8080
+port          = ${APP_PORT}
 use_tls       = false
 tls_cert_path = "/etc/signalhunter/certs/cert.pem"
 tls_key_path  = "/etc/signalhunter/certs/key.pem"
@@ -269,7 +269,7 @@ services:
       mariadb:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${APP_PORT}:${APP_PORT}"
     volumes:
       - ./config/config.toml:/etc/signalhunter/config.toml:ro
       - sh_reports:/opt/signalhunter/reports
@@ -291,6 +291,28 @@ COMPOSE_EOF
 }
 
 # ============================================================
+# Perguntar porta e verificar se está em uso
+# ============================================================
+ask_port() {
+    while true; do
+        read -r -p "$(echo -e "${BOLD}Informe a porta em que a aplicação irá rodar [ex: 8080]:${NC} ")" APP_PORT
+        # Validar se é número e está no range válido
+        if ! [[ "$APP_PORT" =~ ^[0-9]+$ ]] || [[ "$APP_PORT" -lt 1 || "$APP_PORT" -gt 65535 ]]; then
+            warn "Porta inválida. Informe um número entre 1 e 65535."
+            continue
+        fi
+        # Verificar se a porta está em uso
+        if ss -tlnH "sport = :${APP_PORT}" 2>/dev/null | grep -q ":${APP_PORT}" || \
+           ss -ulnH "sport = :${APP_PORT}" 2>/dev/null | grep -q ":${APP_PORT}"; then
+            warn "A porta ${APP_PORT} já está em uso. Escolha outra."
+        else
+            ok "Porta ${APP_PORT} disponível."
+            break
+        fi
+    done
+}
+
+# ============================================================
 # MODO: deploy  (primeira instalação)
 # ============================================================
 do_deploy() {
@@ -301,6 +323,7 @@ do_deploy() {
     echo ""
 
     check_deps
+    ask_port
 
     # Verificar se já existe
     if [[ -d "$REPO_DIR" ]]; then
